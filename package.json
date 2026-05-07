@@ -42,6 +42,9 @@
     "LICENSE",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && node scripts/postbuild-shebang.mjs",
     "dev": "tsx src/cli.ts",
