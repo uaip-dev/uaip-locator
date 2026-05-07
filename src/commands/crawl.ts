@@ -271,14 +271,18 @@ function synthesiseSmokeFromJourney(
     // Pick up to 2 interactable elements with high-signal accessibility
     // info to assert visible. Filters: must be interactable, must have a
     // useful name (so the assertion has a real target).
+    //
+    // Note: `el.accessibleName` is optional (`string | undefined`) and
+    // `el.text` can be empty. Coalesce to "" so .trim() / .slice() are
+    // safe under `noUncheckedIndexedAccess` strictness.
     const candidates = page.elements
-      .filter((el) => el.isInteractable && (el.accessibleName || el.text).trim().length > 0)
+      .filter((el) => el.interactable && nameOf(el).trim().length > 0)
       .slice(0, 2);
     for (const el of candidates) {
       actions.push({
         kind: "expectVisible",
         targetUaipId: el.uaipId,
-        comment: `${el.tag} "${(el.accessibleName || el.text).slice(0, 40)}" visible`,
+        comment: `${el.tag} "${nameOf(el).slice(0, 40)}" visible`,
       });
     }
   }
@@ -306,13 +310,13 @@ function synthesiseTopLevelSmoke(
   ];
   if (start) {
     const candidates = start.elements
-      .filter((el) => el.isInteractable && (el.accessibleName || el.text).trim().length > 0)
+      .filter((el) => el.interactable && nameOf(el).trim().length > 0)
       .slice(0, 3);
     for (const el of candidates) {
       actions.push({
         kind: "expectVisible",
         targetUaipId: el.uaipId,
-        comment: `${el.tag} "${(el.accessibleName || el.text).slice(0, 40)}" visible`,
+        comment: `${el.tag} "${nameOf(el).slice(0, 40)}" visible`,
       });
     }
   }
@@ -321,6 +325,16 @@ function synthesiseTopLevelSmoke(
     description: `Visit ${startUrl} and confirm key elements render`,
     actions,
   };
+}
+
+/**
+ * Best human-readable handle for a UiElement, regardless of which fields
+ * happen to be populated. Used for assertion comments + filtering. Always
+ * returns a string so `.trim()` / `.slice()` are safe under
+ * `noUncheckedIndexedAccess`.
+ */
+function nameOf(el: UiElement): string {
+  return el.accessibleName ?? el.text ?? "";
 }
 
 /**
