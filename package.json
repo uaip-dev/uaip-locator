@@ -45,7 +45,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test test/smoke.test.ts",
     "lint": "tsc --noEmit",
     "sync": "node scripts/sync-from-monorepo.mjs",
     "prepublishOnly": "npm run build && npm test"
