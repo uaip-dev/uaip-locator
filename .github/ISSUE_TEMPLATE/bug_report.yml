@@ -1,0 +1,41 @@
+name: Bug report
+description: Something didn't work as expected
+labels: ["bug", "needs-triage"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Briefly describe what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Minimal steps. The URL you crawled and the exact CLI command help a lot.
+      placeholder: |
+        1. uaip-locator crawl https://example.com --out ./tests
+        2. cd tests && npx playwright test
+        3. observed: …
+        4. expected: …
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Output of `uaip-locator doctor` is ideal. Otherwise OS / Node / package version.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant CLI output. Use code blocks. Strip anything sensitive.
+      render: shell

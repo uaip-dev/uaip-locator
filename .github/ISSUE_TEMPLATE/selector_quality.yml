@@ -1,0 +1,57 @@
+name: Selector quality issue
+description: The engine picked a poor selector for an element
+labels: ["selector-quality", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These are the highest-signal reports we get — selector quality is the OSS's value prop. Thanks for taking the time to file one.
+
+  - type: input
+    id: site
+    attributes:
+      label: Crawled URL
+      description: The page where the bad selector showed up. Public sites only.
+      placeholder: "https://example.com/login"
+    validations:
+      required: true
+
+  - type: textarea
+    id: element-html
+    attributes:
+      label: Element HTML
+      description: |
+        Paste the HTML of the element the engine misidentified. Include enough surrounding context (parent, siblings) that the locator's environment is clear. Use `Inspect element` in your browser dev tools.
+      render: html
+    validations:
+      required: true
+
+  - type: textarea
+    id: emitted
+    attributes:
+      label: Emitted selector
+      description: What the engine produced (copy from the generated Page Object).
+      render: typescript
+      placeholder: |
+        page.getByRole('button').or(page.locator('.btn')).first()
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected selector
+      description: |
+        What you would have written by hand, and *why* it's better. Stability after refactors? Less flaky? Clearer intent?
+      render: typescript
+      placeholder: |
+        page.getByRole('button', { name: 'Sign in' })
+        # better because: text "Sign in" is the visible label and unique on this page
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Optional. Crawl options, screenshots, related issues.

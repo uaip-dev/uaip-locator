@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check CONTRIBUTING.md → "What's NOT in scope here". The OSS deliberately stays single-emitter, public-sites-only, no self-healing. Those constraints are by design and won't change.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the user-visible pain. Avoid jumping to solutions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How might this work? CLI flag, code shape, anything.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you try / think about?

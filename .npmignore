@@ -1,0 +1,16 @@
+# Files to exclude from the published npm tarball.
+# `package.json#files` is the primary control; this is belt-and-suspenders.
+
+src/
+test/
+examples/
+scripts/
+.github/
+*.tsbuildinfo
+*.log
+.editorconfig
+.gitignore
+tsconfig.json
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md

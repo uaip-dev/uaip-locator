@@ -1,0 +1,9 @@
+# If you find uaip-locator useful, the best ways to support it:
+#
+#   • Star the repo and tell a colleague.
+#   • File a high-quality selector-quality issue when you spot a bad pick.
+#   • Send a PR — selector engine + crawler heuristics especially welcome.
+#   • Consider the hosted UAIP at https://uaip.dev — that's what funds this.
+
+# github: [uaip]                # uncomment when GitHub Sponsors is set up
+# custom: ["https://uaip.dev"]
