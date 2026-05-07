@@ -26,7 +26,7 @@
     "node": ">=20"
   },
   "bin": {
-    "uaip-locator": "./dist/cli.js"
+    "uaip-locator": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -43,7 +43,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/postbuild-shebang.mjs",
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test test/smoke.test.ts",
     "lint": "tsc --noEmit",
