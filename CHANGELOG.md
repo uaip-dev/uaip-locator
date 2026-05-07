@@ -24,5 +24,5 @@ Initial public release. The OSS spin-out of the UAIP crawl-and-emit pipeline.
 - Self-healing. Closed-source by design.
 - Telemetry. None. Ever.
 
-[Unreleased]: https://github.com/uaip/uaip-locator/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/uaip/uaip-locator/releases/tag/v0.1.0
+[Unreleased]: https://github.com/uaip-dev/uaip-locator/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/uaip-dev/uaip-locator/releases/tag/v0.1.0

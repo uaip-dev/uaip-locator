@@ -4,13 +4,13 @@
   "description": "Crawl any public website and generate a Playwright TypeScript test suite. Self-healing and multi-framework codegen live in the hosted UAIP — this is the open-source core.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/uaip/uaip-locator#readme",
+  "homepage": "https://github.com/uaip-dev/uaip-locator#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/uaip/uaip-locator.git"
+    "url": "git+https://github.com/uaip-dev/uaip-locator.git"
   },
   "bugs": {
-    "url": "https://github.com/uaip/uaip-locator/issues"
+    "url": "https://github.com/uaip-dev/uaip-locator/issues"
   },
   "keywords": [
     "playwright",

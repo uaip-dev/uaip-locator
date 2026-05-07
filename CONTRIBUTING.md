@@ -29,7 +29,7 @@ Thanks for considering a contribution. This is an open-source project that funds
 ## Development setup
 
 ```bash
-git clone https://github.com/uaip/uaip-locator.git
+git clone https://github.com/uaip-dev/uaip-locator.git
 cd uaip-locator
 npm install
 npx playwright install chromium
