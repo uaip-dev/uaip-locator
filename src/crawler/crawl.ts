@@ -176,6 +176,23 @@ export async function crawlSite(opts: CrawlSiteOptions): Promise<CrawlResult> {
         : {}),
     });
 
+    // ── tsx/esbuild compatibility shim ──
+    // Both `tsx` (used in `npm run dev`) and certain bundler outputs
+    // wrap named functions with `__name(fn, "...")` calls for nicer
+    // stack traces. The helper exists in Node's module scope. When
+    // Playwright stringifies our `page.evaluate(extractElementsBrowser)`
+    // callback and re-parses it inside the browser, those `__name(...)`
+    // calls are still present but `__name` is undefined → the renderer
+    // throws ReferenceError before any of our extraction code runs.
+    // addInitScript runs in the browser at the start of every page/
+    // frame, so the no-op is installed before any evaluate body is
+    // parsed. Compiled tsc output doesn't emit `__name`, so this is a
+    // harmless no-op there. We pass the script as a literal string so
+    // tsx can't transform it on the way through.
+    await context.addInitScript(
+      "if (typeof globalThis.__name !== 'function') { globalThis.__name = function (fn) { return fn; }; }",
+    );
+
     // Attach the HUD before opening the first page so the init script is
     // available on the very first navigation. `noop()` mode skips injection
     // entirely so disabled runs pay zero overhead.
