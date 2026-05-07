@@ -1,16 +1,19 @@
 /**
  * `uaip-locator crawl <url> [options]`
  *
- * The headline command. Walks a public website same-origin, builds a flow
- * graph, picks high-value journeys, generates a Playwright TS test suite
- * into the output folder.
+ * Walks a public website same-origin, builds a flow graph, picks a
+ * minimal smoke scenario from each discovered journey, generates a
+ * Playwright TS test suite into the output folder.
  *
- * Trimmed-down version of the SaaS CLI's crawl command:
+ * Versus the SaaS CLI command at apps/cli/src/commands/crawl.ts:
  *   • no project resolution / billing gate / API client
- *   • no `--auth` / `--remember-auth` / storageState plumbing surfaced
+ *   • no `--auth` / `--remember-auth` / storageState plumbing
  *   • no `--emit <framework>` flag — Playwright TS is the only path
  *   • no `--semantic`/--llm — rule-based labeling is unconditional
- *   • no telemetry, no API key
+ *   • simpler scenario synthesis: one smoke scenario per detected
+ *     journey, no detect-login-form heuristic. The SaaS does richer
+ *     multi-step synthesis; the OSS keeps it deliberately small so
+ *     users have a reason to upgrade for more sophisticated coverage.
  */
 
 import type { CommandModule } from "yargs";
@@ -18,13 +21,20 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import kleur from "kleur";
 import { crawlSite } from "../crawler/index.js";
-import {
-  generateAllBundles,
-} from "../selector-engine/index.js";
+import { generateAllBundles } from "../selector-engine/index.js";
 import { applyPageRules } from "../semantic-rules/index.js";
 import { buildFlowGraph, findJourneys } from "../flow-graph/index.js";
 import { emitPlaywrightTs } from "../codegen/index.js";
-import type { CrawlResult, PageLabel } from "../types/index.js";
+import type {
+  CrawlResult,
+  PageLabel,
+  PageSnapshot,
+  TestAction,
+  TestScenario,
+  UiElement,
+  Journey,
+  CodegenInput,
+} from "../types/index.js";
 
 interface CrawlArgs {
   url: string;
@@ -126,94 +136,196 @@ export const crawlCommand: CommandModule<unknown, CrawlArgs> = {
       process.exit(1);
     }
 
-    // 2. SELECTOR BUNDLES (per element across all pages)
-    const bundles = generateAllBundles(crawl);
-
-    // 3. RULE-BASED PAGE LABELS
-    const labelsByUrl = new Map<string, PageLabel[]>();
-    for (const page of crawl.pages) {
-      labelsByUrl.set(page.url, applyPageRules(page));
-    }
-
-    // 4. FLOW GRAPH + JOURNEY DISCOVERY
-    const graph = buildFlowGraph(crawl, { labelsByUrl });
-    const journeys = findJourneys(graph, { maxJourneys: 8 });
-    log(
-      kleur.dim(`  flow graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`) +
-        kleur.dim(`  · ${journeys.length} journeys discovered`),
-    );
-
-    // 5. CODEGEN
-    const baseName = deriveBaseName(argv.url);
-    const codegenInput = {
-      baseName,
-      ...crawl,
-      pages: crawl.pages.map((p) => ({
-        ...p,
-        labels: labelsByUrl.get(p.url) ?? [],
-      })),
-      journeys,
-      graph,
-    };
-    // The emitter expects the SaaS-shaped CodegenInput; cast since the OSS
-    // doesn't carry semanticLabels (LLM-only) or auth (excluded from OSS).
-    const emit = emitPlaywrightTs(codegenInput as Parameters<typeof emitPlaywrightTs>[0], bundles);
-
-    // 6. WRITE TO DISK
-    const outDir = resolve(argv.out);
-    await mkdir(outDir, { recursive: true });
-    await writeFile(
-      join(outDir, "crawl.json"),
-      JSON.stringify(crawl, null, 2),
-      "utf8",
-    );
-    // OSS manifest — same shape the SaaS uses, identifies the producer.
-    await writeFile(
-      join(outDir, "uaip-manifest.json"),
-      JSON.stringify(
-        {
-          tool: "uaip-locator",
-          version: readPackageVersion(),
-          framework: "playwright-ts",
-          crawlId: basename(outDir),
-          host: hostOf(argv.url),
-          startUrl: argv.url,
-          pageCount: crawl.pages.length,
-          journeyCount: journeys.length,
-          emittedAt: new Date().toISOString(),
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-    for (const [name, content] of Object.entries(emit.files)) {
-      const dest = join(outDir, name);
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, content, "utf8");
-    }
-
-    log(kleur.green(kleur.bold("✓ done")));
-    log(kleur.dim("  out:    ") + outDir);
-    log(
-      kleur.dim("  files:  ") +
-        Object.keys(emit.files).slice(0, 6).join(", ") +
-        (Object.keys(emit.files).length > 6 ? "…" : ""),
-    );
-    log("");
-    log(
-      kleur.dim("  next:   ") +
-        kleur.bold(
-          `cd ${argv.out} && npm i && npx playwright install chromium && npx playwright test`,
-        ),
-    );
+    await pipelineAndWrite(crawl, argv.url, argv.out, log);
   },
 };
 
 /**
+ * Shared crawl→emit pipeline used by both `crawl` and `emit`. Computes
+ * selectors, page labels, flow graph, scenarios, then writes the suite
+ * to disk. Extracted so re-emitting from a saved crawl.json takes the
+ * exact same code path as a fresh crawl.
+ */
+export async function pipelineAndWrite(
+  crawl: CrawlResult,
+  startUrl: string,
+  outDir: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  // 2. SELECTOR BUNDLES — flat across all pages, keyed by uaipId.
+  //    Two pages' identical elements (e.g. shared header) collapse to
+  //    one bundle, which is what we want.
+  const allElements: UiElement[] = crawl.pages.flatMap((p) => p.elements);
+  const bundles = generateAllBundles(allElements);
+  // Mutate crawl in place — emitters read crawl.selectors when present.
+  crawl.selectors = bundles;
+
+  // 3. RULE-BASED PAGE LABELS — keyed by URL. The OSS does not include
+  //    the LLM/embeddings fallback; rules only.
+  const pageLabels: Record<string, PageLabel[]> = {};
+  for (const page of crawl.pages) {
+    const labels = applyPageRules(page);
+    if (labels.length > 0) pageLabels[page.url] = labels;
+  }
+  crawl.pageLabels = pageLabels;
+
+  // 4. FLOW GRAPH + JOURNEY DISCOVERY. fallbackUrlLabels: true keeps
+  //    rule-unmatched pages in the graph (labelled from URL path) so
+  //    sites whose vocabulary isn't in our rule registry still produce
+  //    a useful graph.
+  const graph = buildFlowGraph(crawl, { fallbackUrlLabels: true });
+  const journeys = findJourneys(graph);
+  log(
+    kleur.dim(
+      `  flow graph: ${graph.nodes.length} nodes / ${graph.edges.length} edges · ${journeys.length} journeys`,
+    ),
+  );
+
+  // 5. SCENARIO SYNTHESIS — minimal. One smoke scenario per journey,
+  //    each visiting the journey's pages and asserting that a few
+  //    high-confidence visible elements exist. The SaaS does richer
+  //    journey-shaped scenarios with click/fill sequences; the OSS
+  //    deliberately ships a smaller surface.
+  const scenarios = journeys.length > 0
+    ? journeys.slice(0, 5).map((j, i) => synthesiseSmokeFromJourney(j, crawl.pages, i))
+    : [synthesiseTopLevelSmoke(startUrl, crawl.pages)];
+
+  // 6. CODEGEN
+  const baseName = deriveBaseName(startUrl);
+  const codegenInput: CodegenInput = {
+    baseName,
+    baseUrl: startUrl,
+    scenarios,
+    ...(Object.keys(pageLabels).length > 0 ? { pageLabels } : {}),
+  };
+  const emit = emitPlaywrightTs(codegenInput, bundles);
+
+  // 7. WRITE TO DISK
+  const absOut = resolve(outDir);
+  await mkdir(absOut, { recursive: true });
+  await writeFile(join(absOut, "crawl.json"), JSON.stringify(crawl, null, 2), "utf8");
+  await writeFile(
+    join(absOut, "uaip-manifest.json"),
+    JSON.stringify(
+      {
+        tool: "uaip-locator",
+        version: readPackageVersion(),
+        framework: "playwright-ts",
+        crawlId: basename(absOut),
+        host: hostOf(startUrl),
+        startUrl,
+        pageCount: crawl.pages.length,
+        journeyCount: journeys.length,
+        emittedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  for (const [name, content] of Object.entries(emit.files)) {
+    const dest = join(absOut, name);
+    await mkdir(dirname(dest), { recursive: true });
+    await writeFile(dest, content, "utf8");
+  }
+
+  log(kleur.green(kleur.bold("✓ done")));
+  log(kleur.dim("  out:    ") + absOut);
+  log(
+    kleur.dim("  files:  ") +
+      Object.keys(emit.files).slice(0, 6).join(", ") +
+      (Object.keys(emit.files).length > 6 ? "…" : ""),
+  );
+  log("");
+  log(
+    kleur.dim("  next:   ") +
+      kleur.bold(
+        `cd ${outDir} && npm i && npx playwright install chromium && npx playwright test`,
+      ),
+  );
+}
+
+/**
+ * Build a smoke scenario from a discovered journey. Visits each URL the
+ * journey passes through and asserts a couple of interactable elements
+ * are visible. Doesn't try to drive forms or click through — that's
+ * where the SaaS multi-journey synthesis lives.
+ *
+ * Note: per @uaip/core, `Journey.nodes` is `string[]` (the URLs of the
+ * traversed pages) and `Journey.labels` is the parallel array of
+ * label-id strings. `Journey.name` is already PascalCased — we reuse it.
+ */
+function synthesiseSmokeFromJourney(
+  journey: Journey,
+  pages: PageSnapshot[],
+  index: number,
+): TestScenario {
+  const pagesByUrl = new Map(pages.map((p) => [p.url, p]));
+  const actions: TestAction[] = [];
+  const visitedUrls: string[] = [];
+  for (const url of journey.nodes) {
+    const page = pagesByUrl.get(url);
+    if (!page) continue;
+    actions.push({ kind: "navigate", url, comment: `Visit ${url}` });
+    visitedUrls.push(url);
+    // Pick up to 2 interactable elements with high-signal accessibility
+    // info to assert visible. Filters: must be interactable, must have a
+    // useful name (so the assertion has a real target).
+    const candidates = page.elements
+      .filter((el) => el.isInteractable && (el.accessibleName || el.text).trim().length > 0)
+      .slice(0, 2);
+    for (const el of candidates) {
+      actions.push({
+        kind: "expectVisible",
+        targetUaipId: el.uaipId,
+        comment: `${el.tag} "${(el.accessibleName || el.text).slice(0, 40)}" visible`,
+      });
+    }
+  }
+  const baseName = journey.name && journey.name.length > 0
+    ? journey.name.replace(/Journey$/, "")
+    : `Journey${index + 1}`;
+  return {
+    name: `${baseName}Smoke`,
+    description: `Smoke walk of ${visitedUrls.length} page(s) — journey: ${journey.nodes.join(" → ")}`,
+    actions,
+  };
+}
+
+/**
+ * Fallback when no journeys were found: visit the start URL, assert a
+ * couple of visible elements. Always produces something testable.
+ */
+function synthesiseTopLevelSmoke(
+  startUrl: string,
+  pages: PageSnapshot[],
+): TestScenario {
+  const start = pages[0];
+  const actions: TestAction[] = [
+    { kind: "navigate", url: startUrl, comment: `Visit ${startUrl}` },
+  ];
+  if (start) {
+    const candidates = start.elements
+      .filter((el) => el.isInteractable && (el.accessibleName || el.text).trim().length > 0)
+      .slice(0, 3);
+    for (const el of candidates) {
+      actions.push({
+        kind: "expectVisible",
+        targetUaipId: el.uaipId,
+        comment: `${el.tag} "${(el.accessibleName || el.text).slice(0, 40)}" visible`,
+      });
+    }
+  }
+  return {
+    name: "Smoke",
+    description: `Visit ${startUrl} and confirm key elements render`,
+    actions,
+  };
+}
+
+/**
  * Pick a sensible test-class base name from the URL host. saucedemo.com →
- * SaucedemoCom; my-site.example → MySiteExample. Used as the SmokeTest
- * class prefix in emitted code.
+ * SaucedemoCom; my-site.example → MySiteExample.
  */
 function deriveBaseName(url: string): string {
   try {
@@ -238,14 +350,15 @@ function hostOf(url: string): string {
 }
 
 /**
- * Read our own version from package.json — used for the manifest. We do
- * the simplest thing that works in both `tsx src/cli.ts` (dev) and the
- * compiled bundle (`dist/cli.js`).
+ * Read our own version from package.json — used for the manifest. We
+ * use createRequire so the file resolves at runtime in both ESM and
+ * the compiled output.
  */
 function readPackageVersion(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const pkg = require("../../package.json") as { version: string };
+    const { createRequire } = require("node:module") as typeof import("node:module");
+    const req = createRequire(import.meta.url);
+    const pkg = req("../../package.json") as { version: string };
     return pkg.version;
   } catch {
     return "unknown";

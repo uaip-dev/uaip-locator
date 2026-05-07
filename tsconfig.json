@@ -1,12 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
-    "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,9 +13,21 @@
     "declarationMap": true,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "lib": ["ES2022"],
+    // DOM globals are needed inside Playwright `page.evaluate(...)`
+    // callbacks (which the crawler uses heavily — see crawler/extract.ts
+    // and crawler/hud.ts). Adding "DOM" to lib makes `document`,
+    // `window`, `HTMLAnchorElement` etc. type-resolve at compile time.
+    // The runtime stripping happens because Playwright stringifies the
+    // callback and re-parses it inside the browser, where DOM IS the
+    // global. Mirrors the SaaS tsconfig.base.json.
+    "lib": ["ES2022", "DOM"],
     "types": ["node"],
-    "verbatimModuleSyntax": true
+    // exactOptionalPropertyTypes is intentionally false here. The
+    // inherited @uaip/core types use `field?: T` to mean "possibly
+    // missing OR undefined-valued", and the crawler builds objects
+    // that pass `undefined` for optional fields. Tightening to true
+    // would force a sweep across ~20 sites.
+    "exactOptionalPropertyTypes": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "test", "scripts"]

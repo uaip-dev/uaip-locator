@@ -1,25 +1,21 @@
 /**
  * `uaip-locator emit <crawl-json> [options]`
  *
- * Re-emit a Playwright TS test suite from an existing crawl.json without
- * re-crawling the live site. Useful when:
- *   • iterating on the emitter (clear the output dir, change selectors,
- *     re-emit, diff the output)
- *   • the live site is intermittently down but you have a recorded crawl
- *   • you want deterministic test-output for snapshot tests
+ * Re-emit a Playwright TS test suite from an existing crawl.json. Useful
+ * when iterating on the emitter (clear the output dir, change selectors,
+ * re-emit, diff the output) or when the live site is intermittently down
+ * but you have a recorded crawl.
  *
- * The crawl.json file is the same one `crawl` writes to the output dir.
+ * Reuses the same crawl→emit pipeline as `crawl` so output is byte-for-byte
+ * identical given the same input crawl.json.
  */
 
 import type { CommandModule } from "yargs";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import kleur from "kleur";
-import { generateAllBundles } from "../selector-engine/index.js";
-import { applyPageRules } from "../semantic-rules/index.js";
-import { buildFlowGraph, findJourneys } from "../flow-graph/index.js";
-import { emitPlaywrightTs } from "../codegen/index.js";
-import type { CrawlResult, PageLabel } from "../types/index.js";
+import type { CrawlResult } from "../types/index.js";
+import { pipelineAndWrite } from "./crawl.js";
 
 interface EmitArgs {
   crawlJson: string;
@@ -59,53 +55,21 @@ export const emitCommand: CommandModule<unknown, EmitArgs> = {
       process.exit(1);
     }
 
-    const bundles = generateAllBundles(crawl);
-    const labelsByUrl = new Map<string, PageLabel[]>();
-    for (const page of crawl.pages) labelsByUrl.set(page.url, applyPageRules(page));
-    const graph = buildFlowGraph(crawl, { labelsByUrl });
-    const journeys = findJourneys(graph, { maxJourneys: 8 });
-
-    const baseName = deriveBaseName(crawl.startUrl);
-    const codegenInput = {
-      baseName,
-      ...crawl,
-      pages: crawl.pages.map((p) => ({
-        ...p,
-        labels: labelsByUrl.get(p.url) ?? [],
-      })),
-      journeys,
-      graph,
-    };
-    const emit = emitPlaywrightTs(codegenInput as Parameters<typeof emitPlaywrightTs>[0], bundles);
-
-    const outDir = resolve(argv.out);
-    await mkdir(outDir, { recursive: true });
-    await writeFile(join(outDir, "crawl.json"), JSON.stringify(crawl, null, 2), "utf8");
-    for (const [name, content] of Object.entries(emit.files)) {
-      const dest = join(outDir, name);
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, content, "utf8");
+    // The CrawlResult carries its own start URL on `target.url` —
+    // that's the canonical place per @uaip/core. Older crawl.json
+    // files may have it on a top-level field; we tolerate both.
+    const startUrl =
+      crawl.target?.url ??
+      ((crawl as unknown as { startUrl?: string }).startUrl ?? "");
+    if (!startUrl) {
+      log(
+        kleur.red(
+          "✗ crawl.json missing target.url — was this file produced by uaip-locator?",
+        ),
+      );
+      process.exit(1);
     }
-    log(kleur.green(kleur.bold("✓ done")));
-    log(kleur.dim("  out: ") + outDir);
-    log(
-      kleur.dim("  files: ") +
-        Object.keys(emit.files).slice(0, 6).join(", ") +
-        (Object.keys(emit.files).length > 6 ? "…" : ""),
-    );
+
+    await pipelineAndWrite(crawl, startUrl, argv.out, log);
   },
 };
-
-function deriveBaseName(url: string): string {
-  try {
-    const host = new URL(url).host.replace(/^www\./, "");
-    return host
-      .split(/[.-]/)
-      .filter(Boolean)
-      .map((s) => s[0]!.toUpperCase() + s.slice(1).toLowerCase())
-      .join("")
-      .replace(/[^A-Za-z0-9]/g, "");
-  } catch {
-    return basename(url);
-  }
-}
