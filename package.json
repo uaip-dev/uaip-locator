@@ -1,6 +1,6 @@
 {
   "name": "@uaip/locator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Crawl any public website and generate a Playwright TypeScript test suite. Self-healing and multi-framework codegen live in the hosted UAIP — this is the open-source core.",
   "type": "module",
   "license": "MIT",
